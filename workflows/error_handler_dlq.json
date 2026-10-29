@@ -1,6 +1,7 @@
 {
   "id": "error_handler_dlq",
   "name": "Global Error Handler & Dead Letter Queue (DLQ)",
+  "active": true,
   "nodes": [
     {
       "parameters": {},

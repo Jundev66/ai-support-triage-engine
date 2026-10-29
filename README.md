@@ -74,13 +74,21 @@ This starts:
 - **PostgreSQL 16 + pgvector**: Running on `127.0.0.1:5432` with pre-initialized schemas (`n8n_system` & `app_triage`), HNSW vector index, and seeded knowledge base entries.
 
 ### 3. Import & Activate Workflows
-Import the workflows directly into the running n8n container:
+Import credentials and workflows into the container and refresh the webhook router:
 ```bash
-docker exec -i triage_n8n n8n import:workflow < workflows/error_handler_dlq.json
-docker exec -i triage_n8n n8n import:workflow < workflows/ai_support_triage_flow.json
+# 1. Import database credentials
+docker exec triage_n8n n8n import:credentials --input=/workflows/../credentials/postgres_credential.example.json
+
+# 2. Import workflows
+docker exec triage_n8n n8n import:workflow --input=/workflows/error_handler_dlq.json
+docker exec triage_n8n n8n import:workflow --input=/workflows/ai_support_triage_flow.json
+
+# 3. Ensure workflows are active and restart n8n to register webhook endpoints in memory
+docker exec triage_n8n n8n update:workflow --all --active=true || true
+docker compose restart n8n
 ```
 
-Or run the idempotent script via Node.js (requires `N8N_API_KEY` set in your environment):
+Or manage workflows programmatically via the idempotent Node.js REST API script:
 ```bash
 npm install
 node scripts/import-workflows.js

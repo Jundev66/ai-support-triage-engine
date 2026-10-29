@@ -47,6 +47,13 @@ services:
       - WEBHOOK_SECRET_TOKEN=${WEBHOOK_SECRET_TOKEN:-secure_triage_webhook_bearer_token_xyz123}
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5678/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks:
       - triage_network
     depends_on:

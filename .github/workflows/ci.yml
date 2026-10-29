@@ -32,10 +32,19 @@ jobs:
       - name: Start Docker stack
         run: docker compose up -d --wait
 
-      - name: Import workflows to n8n
+      - name: Configure credentials in n8n
         run: |
-          docker exec -i triage_n8n n8n import:workflow < workflows/error_handler_dlq.json
-          docker exec -i triage_n8n n8n import:workflow < workflows/ai_support_triage_flow.json
+          sed "s/CHANGE_ME_IN_PRODUCTION/postgres_secure_pass_change_in_prod/g" credentials/postgres_credential.example.json > /tmp/credentials.json
+          docker cp /tmp/credentials.json triage_n8n:/tmp/credentials.json
+          docker exec triage_n8n n8n import:credentials --input=/tmp/credentials.json
+
+      - name: Import and activate workflows
+        run: |
+          docker exec triage_n8n n8n import:workflow --input=/workflows/error_handler_dlq.json
+          docker exec triage_n8n n8n import:workflow --input=/workflows/ai_support_triage_flow.json
+          docker exec triage_n8n n8n update:workflow --all --active=true || true
+          docker compose restart n8n
+          timeout 60 bash -c 'until curl -sSf http://localhost:5678/healthz; do echo "Waiting for n8n webhook router..."; sleep 2; done'
 
       - name: Run Playwright Tests
         run: npm test
