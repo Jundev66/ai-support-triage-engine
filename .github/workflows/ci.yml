@@ -37,6 +37,7 @@ jobs:
           sed "s/CHANGE_ME_IN_PRODUCTION/postgres_secure_pass_change_in_prod/g" credentials/postgres_credential.example.json > /tmp/credentials.json
           docker cp /tmp/credentials.json triage_n8n:/tmp/credentials.json
           docker exec triage_n8n n8n import:credentials --input=/tmp/credentials.json
+          docker exec triage_postgres psql -U postgres -d n8n_triage -c "UPDATE n8n_system.credentials_entity SET id = '1' WHERE name = 'Postgres Triage DB';" || true
 
       - name: Import and activate workflows
         run: |
@@ -66,6 +67,14 @@ jobs:
 
       - name: Run Playwright Tests
         run: npm test
+
+      - name: Debug container logs on test failure
+        if: failure()
+        run: |
+          echo "=== n8n Container Logs on Failure ==="
+          docker logs --tail=100 triage_n8n
+          echo "=== DLQ Entries ==="
+          docker exec triage_postgres psql -U postgres -d n8n_triage -c "SELECT id, workflow_id, error_message, error_node, error_stack FROM app_triage.dead_letter_queue;" || true
 
       - name: Upload Test Report
         if: always()
