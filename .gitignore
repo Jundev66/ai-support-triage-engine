@@ -1,0 +1,21 @@
+# Environment secrets
+.env
+*.env.local
+credentials/*.json
+!credentials/*.example.json
+
+# Node & Playwright
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Docker volumes and local data
+postgres_data/
+n8n_data/
+
+# OS specific
+Thumbs.db
+.DS_Store
+*.log

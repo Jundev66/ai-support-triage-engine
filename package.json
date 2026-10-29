@@ -1,0 +1,17 @@
+{
+  "name": "ai-support-triage-engine",
+  "version": "1.0.0",
+  "description": "Production-grade AI Support Triage Pipeline with n8n, PostgreSQL pgvector, and automated testing",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test",
+    "test:api": "playwright test tests/api",
+    "test:e2e": "playwright test tests/e2e",
+    "test:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

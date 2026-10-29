@@ -1,0 +1,253 @@
+{
+  "name": "AI Support Triage & Escalation Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support-ticket",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Inbound Ticket",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+    },
+    {
+      "parameters": {
+        "jsCode": "const headers = $input.first().json.headers || {};\nconst body = $input.first().json.body || {};\nconst authHeader = headers['x-webhook-token'] || headers['authorization'];\n\nconst expectedToken = $env.WEBHOOK_SECRET_TOKEN || 'secure_triage_webhook_bearer_token_xyz123';\nconst cleanAuth = authHeader ? authHeader.replace(/^Bearer\\s+/i, '') : '';\n\nif (!cleanAuth || cleanAuth !== expectedToken) {\n  return [{\n    json: {\n      isValid: false,\n      errorCode: 401,\n      errorMessage: 'Unauthorized: Invalid or missing webhook security token.'\n    }\n  }];\n}\n\nconst { idempotency_key, customer_id, customer_email, subject, content } = body;\nif (!idempotency_key || !customer_email || !subject || !content) {\n  return [{\n    json: {\n      isValid: false,\n      errorCode: 400,\n      errorMessage: 'Bad Request: Missing required fields (idempotency_key, customer_email, subject, content).'\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    isValid: true,\n    data: {\n      idempotency_key: String(idempotency_key).trim(),\n      customer_id: customer_id ? String(customer_id).trim() : 'anonymous',\n      customer_email: String(customer_email).trim().toLowerCase(),\n      subject: String(subject).trim().slice(0, 255),\n      content: String(content).trim()\n    }\n  }\n}];"
+      },
+      "id": "validate-auth-schema",
+      "name": "Validate Auth & Schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isValid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-valid-auth",
+      "name": "Is Request Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: $json.errorMessage } }}",
+        "options": {
+          "responseCode": "={{ Number($json.errorCode) || 400 }}"
+        }
+      },
+      "id": "response-auth-error",
+      "name": "Return Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [880, 480]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, resolution_status, assigned_tier, automated_response FROM app_triage.tickets WHERE idempotency_key = $1 LIMIT 1;",
+        "additionalFields": {
+          "queryParams": "={{ [$json.data.idempotency_key] }}"
+        }
+      },
+      "id": "check-idempotency-db",
+      "name": "Check DB Idempotency",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [880, 240],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres Triage DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.id }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "if-already-processed",
+      "name": "Already Processed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1100, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'idempotent_duplicate', ticket_id: $json.id, resolution_status: $json.resolution_status, assigned_tier: $json.assigned_tier } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "response-idempotent",
+      "name": "Return Idempotent Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1320, 140]
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $('Validate Auth & Schema').first().json.data;\nconst combinedText = `${payload.subject} ${payload.content}`.toLowerCase();\n\nlet category = 'general';\nlet urgency = 'normal';\nlet sentiment = 'neutral';\nlet assigned_tier = 'tier_1_bot';\nlet automated_response = null;\n\nif (combinedText.includes('password') || combinedText.includes('login') || combinedText.includes('credentials')) {\n  category = 'auth';\n  urgency = 'normal';\n  sentiment = 'neutral';\n  assigned_tier = 'tier_1_bot';\n  automated_response = 'You can reset your corporate credentials at https://app.example.com/forgot-password. A 15-minute OTP has been initiated.';\n} else if (combinedText.includes('invoice') || combinedText.includes('billing') || combinedText.includes('charge') || combinedText.includes('refund')) {\n  category = 'billing';\n  urgency = 'high';\n  sentiment = 'urgent';\n  assigned_tier = 'tier_2_human';\n} else if (combinedText.includes('down') || combinedText.includes('outage') || combinedText.includes('exploit') || combinedText.includes('breach') || combinedText.includes('urgent')) {\n  category = 'incident';\n  urgency = 'critical';\n  sentiment = 'urgent';\n  assigned_tier = 'security_escalation';\n}\n\nreturn [{\n  json: {\n    ...payload,\n    category,\n    urgency,\n    sentiment,\n    assigned_tier,\n    resolution_status: assigned_tier === 'tier_1_bot' ? 'resolved' : 'pending_human',\n    automated_response\n  }\n}];"
+      },
+      "id": "ai-triage-router",
+      "name": "AI Triage & Sentiment Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 340]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO app_triage.tickets (idempotency_key, customer_id, customer_email, subject, content, category, urgency, sentiment, assigned_tier, resolution_status, automated_response) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (idempotency_key) DO UPDATE SET updated_at = NOW() RETURNING id, idempotency_key, category, urgency, assigned_tier, resolution_status, automated_response, created_at, (xmax = 0) AS is_new_record;",
+        "additionalFields": {
+          "queryParams": "={{ [$json.idempotency_key, $json.customer_id, $json.customer_email, $json.subject, $json.content, $json.category, $json.urgency, $json.sentiment, $json.assigned_tier, $json.resolution_status, $json.automated_response || ''] }}"
+        }
+      },
+      "id": "persist-ticket-db",
+      "name": "Persist Ticket in PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1540, 340],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres Triage DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, ticket: $json } }}",
+        "options": {
+          "responseCode": "={{ $json.is_new_record === false ? 200 : 201 }}"
+        }
+      },
+      "id": "response-success",
+      "name": "Return Success 201",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1760, 340]
+    }
+  ],
+  "connections": {
+    "Webhook Inbound Ticket": {
+      "main": [
+        [
+          {
+            "node": "Validate Auth & Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Auth & Schema": {
+      "main": [
+        [
+          {
+            "node": "Is Request Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Request Valid?": {
+      "main": [
+        [
+          {
+            "node": "Check DB Idempotency",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check DB Idempotency": {
+      "main": [
+        [
+          {
+            "node": "Already Processed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Processed?": {
+      "main": [
+        [
+          {
+            "node": "Return Idempotent Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Triage & Sentiment Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Triage & Sentiment Analysis": {
+      "main": [
+        [
+          {
+            "node": "Persist Ticket in PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Ticket in PostgreSQL": {
+      "main": [
+        [
+          {
+            "node": "Return Success 201",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "error_handler_dlq"
+  }
+}
