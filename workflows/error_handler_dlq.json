@@ -15,7 +15,7 @@
       "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO app_triage.dead_letter_queue (workflow_id, execution_id, error_message, error_node, error_stack, failed_payload) VALUES ($1, $2, $3, $4, $5, $6::jsonb) RETURNING id, created_at;",
-        "additionalFields": {
+        "options": {
           "queryParams": "={{ [$json.execution.workflowId || 'unknown_workflow', $json.execution.id || 'unknown_execution', $json.execution.error.message || 'Unknown error', $json.execution.error.node.name || 'Unknown node', $json.execution.error.stack || '', JSON.stringify($json.execution.data || {})] }}"
         }
       },
