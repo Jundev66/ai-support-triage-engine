@@ -1,4 +1,5 @@
 {
+  "id": "ai_support_triage_flow",
   "name": "AI Support Triage & Escalation Pipeline",
   "active": true,
   "nodes": [

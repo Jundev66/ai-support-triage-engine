@@ -83,8 +83,9 @@ docker exec triage_n8n n8n import:credentials --input=/workflows/../credentials/
 docker exec triage_n8n n8n import:workflow --input=/workflows/error_handler_dlq.json
 docker exec triage_n8n n8n import:workflow --input=/workflows/ai_support_triage_flow.json
 
-# 3. Ensure workflows are active and restart n8n to register webhook endpoints in memory
-docker exec triage_n8n n8n update:workflow --all --active=true || true
+# 3. Publish workflows and restart n8n to register webhook endpoints in memory
+docker exec triage_n8n n8n publish:workflow --id=ai_support_triage_flow || true
+docker exec triage_n8n n8n publish:workflow --id=error_handler_dlq || true
 docker compose restart n8n
 ```
 
