@@ -61,10 +61,8 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, resolution_status, assigned_tier, automated_response FROM app_triage.tickets WHERE idempotency_key = $1 LIMIT 1;",
-        "options": {
-          "queryParams": "={{ [$json.data.idempotency_key] }}"
-        }
+        "query": "=SELECT id, resolution_status, assigned_tier, automated_response FROM app_triage.check_idempotency('{{ $json.data.idempotency_key.replace(/'/g, \"''\") }}');",
+        "options": {}
       },
       "id": "check-idempotency-db",
       "name": "Check DB Idempotency",
@@ -123,10 +121,8 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO app_triage.tickets (idempotency_key, customer_id, customer_email, subject, content, category, urgency, sentiment, assigned_tier, resolution_status, automated_response) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (idempotency_key) DO UPDATE SET updated_at = NOW() RETURNING id, idempotency_key, category, urgency, assigned_tier, resolution_status, automated_response, created_at, (xmax::text = '0') AS is_new_record;",
-        "options": {
-          "queryParams": "={{ [$json.idempotency_key, $json.customer_id, $json.customer_email, $json.subject, $json.content, $json.category, $json.urgency, $json.sentiment, $json.assigned_tier, $json.resolution_status, $json.automated_response || ''] }}"
-        }
+        "query": "=SELECT * FROM app_triage.upsert_ticket('{{ $json.idempotency_key.replace(/'/g, \"''\") }}', '{{ $json.customer_id.replace(/'/g, \"''\") }}', '{{ $json.customer_email.replace(/'/g, \"''\") }}', '{{ $json.subject.replace(/'/g, \"''\") }}', '{{ $json.content.replace(/'/g, \"''\") }}', '{{ $json.category }}', '{{ $json.urgency }}', '{{ $json.sentiment }}', '{{ $json.assigned_tier }}', '{{ $json.resolution_status }}', '{{ ($json.automated_response || '').replace(/'/g, \"''\") }}');",
+        "options": {}
       },
       "id": "persist-ticket-db",
       "name": "Persist Ticket in PostgreSQL",

@@ -66,6 +66,60 @@ CREATE TABLE IF NOT EXISTS app_triage.dead_letter_queue (
 CREATE INDEX IF NOT EXISTS idx_dlq_resolved ON app_triage.dead_letter_queue(resolved);
 CREATE INDEX IF NOT EXISTS idx_dlq_created_at ON app_triage.dead_letter_queue(created_at DESC);
 
+-- Helper function to check ticket idempotency cleanly
+CREATE OR REPLACE FUNCTION app_triage.check_idempotency(p_key VARCHAR)
+RETURNS TABLE (
+    id UUID,
+    resolution_status VARCHAR,
+    assigned_tier VARCHAR,
+    automated_response TEXT
+) AS $$
+    SELECT id, resolution_status, assigned_tier, automated_response 
+    FROM app_triage.tickets 
+    WHERE idempotency_key = p_key 
+    LIMIT 1;
+$$ LANGUAGE sql STABLE;
+
+-- Atomic upsert function to avoid TOCTOU race conditions and query param parsing discrepancies
+CREATE OR REPLACE FUNCTION app_triage.upsert_ticket(
+    p_idempotency_key VARCHAR,
+    p_customer_id VARCHAR,
+    p_customer_email VARCHAR,
+    p_subject VARCHAR,
+    p_content TEXT,
+    p_category VARCHAR,
+    p_urgency VARCHAR,
+    p_sentiment VARCHAR,
+    p_assigned_tier VARCHAR,
+    p_resolution_status VARCHAR,
+    p_automated_response TEXT
+)
+RETURNS TABLE (
+    id UUID,
+    idempotency_key VARCHAR,
+    category VARCHAR,
+    urgency VARCHAR,
+    assigned_tier VARCHAR,
+    resolution_status VARCHAR,
+    automated_response TEXT,
+    created_at TIMESTAMPTZ,
+    is_new_record BOOLEAN
+) AS $$
+    INSERT INTO app_triage.tickets (
+        idempotency_key, customer_id, customer_email, subject, content,
+        category, urgency, sentiment, assigned_tier, resolution_status, automated_response
+    ) VALUES (
+        p_idempotency_key, p_customer_id, p_customer_email, p_subject, p_content,
+        p_category, p_urgency, p_sentiment, p_assigned_tier, p_resolution_status, NULLIF(p_automated_response, '')
+    )
+    ON CONFLICT (idempotency_key) DO UPDATE
+    SET updated_at = NOW()
+    RETURNING 
+        tickets.id, tickets.idempotency_key, tickets.category, tickets.urgency, 
+        tickets.assigned_tier, tickets.resolution_status, tickets.automated_response, 
+        tickets.created_at, (xmax::text = '0') AS is_new_record;
+$$ LANGUAGE sql VOLATILE;
+
 -- Helper function to generate deterministic test embeddings (1536 dim) for dev/testing environments without external API keys
 CREATE OR REPLACE FUNCTION app_triage.generate_test_embedding(seed_val int)
 RETURNS vector(1536) AS $$
