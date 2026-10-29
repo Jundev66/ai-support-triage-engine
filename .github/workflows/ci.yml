@@ -40,16 +40,29 @@ jobs:
 
       - name: Import and activate workflows
         run: |
-          docker exec triage_n8n n8n import:workflow --input=/workflows/error_handler_dlq.json
-          docker exec triage_n8n n8n import:workflow --input=/workflows/ai_support_triage_flow.json
+          docker exec -u node triage_n8n n8n import:workflow --input=/workflows/error_handler_dlq.json
+          docker exec -u node triage_n8n n8n import:workflow --input=/workflows/ai_support_triage_flow.json
           for id in $(docker exec triage_postgres psql -U postgres -d n8n_triage -t -A -c "SELECT id FROM n8n_system.workflow_entity;"); do
             echo "Publishing workflow ID: $id"
-            docker exec triage_n8n n8n publish:workflow --id="$id" || true
+            docker exec -u node triage_n8n n8n publish:workflow --id="$id" || true
           done
           docker exec triage_postgres psql -U postgres -d n8n_triage -c "UPDATE n8n_system.workflow_entity SET active = true;"
           docker compose restart n8n
           timeout 60 bash -c 'until curl -sSf http://localhost:5678/healthz; do echo "Waiting for n8n webhook router..."; sleep 2; done'
           sleep 5
+
+      - name: Inspect webhook registration and container logs
+        run: |
+          echo "=== Webhook Entity DB Table ==="
+          docker exec triage_postgres psql -U postgres -d n8n_triage -c "SELECT * FROM n8n_system.webhook_entity;" || true
+          echo "=== Workflow Entity DB Table ==="
+          docker exec triage_postgres psql -U postgres -d n8n_triage -c "SELECT id, name, active FROM n8n_system.workflow_entity;" || true
+          echo "=== Curl test endpoints ==="
+          curl -i -X POST http://localhost:5678/webhook/support-ticket || true
+          curl -i -X POST http://localhost:5678/webhook/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d || true
+          curl -i -X POST http://localhost:5678/webhook/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/support-ticket || true
+          echo "=== n8n container logs (last 50 lines) ==="
+          docker logs --tail=50 triage_n8n
 
       - name: Run Playwright Tests
         run: npm test
